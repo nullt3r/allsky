@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <fstream>
 #include <stdarg.h>
+#include <thread>
 
 #include <iomanip>
 #include <cstring>
@@ -59,6 +60,14 @@ std::string errorOutput			= "/tmp/capture_RPi_debug.txt";
 //---------------------------------------------------------------------------------------------
 //---------------------------------------------------------------------------------------------
 
+void saveImageNonBlocking(const std::string& filename, const cv::Mat& image, const std::vector<int>& compressionParams)
+{
+    bool result = cv::imwrite(filename, image, compressionParams);
+    if (!result)
+    {
+        fprintf(stderr, "*** ERROR: Unable to write to '%s'\n", filename.c_str());
+    }
+}
 
 // Build capture command to capture the image from the camera.
 // If an argument is IS_DEFAULT, the user didn't set it so don't pass to the program and
@@ -776,47 +785,53 @@ myModeMeanSetting.modeMean = CG.myModeMeanSetting.modeMean;
 				CG.lastFocusMetric = CG.overlay.showFocus ? (int)round(get_focus_metric(pRgb)) : -1;
 
 				// If takeDarkFrames is off, add overlay text to the image
-				if (! CG.takeDarkFrames)
+				if (!CG.takeDarkFrames)
 				{
-					CG.lastExposure_us = myRaspistillSetting.shutter_us;
-					if (myModeMeanSetting.meanAuto != MEAN_AUTO_OFF)
-					{
-						CG.lastGain =  myRaspistillSetting.analoggain;
-					}
-					else
-					{
-						CG.lastGain = CG.currentGain;	// ZWO gain=0.1 dB , RPi gain=factor
-					}
-
-					CG.lastMean = aegCalcMean(pRgb, true);
-					CG.lastMeanFull = aegCalcMean(pRgb, false);
-					if (myModeMeanSetting.meanAuto != MEAN_AUTO_OFF)
-					{
-						// set myRaspistillSetting.shutter_us and myRaspistillSetting.analoggain
-						aegGetNextExposureSettings(&CG, myRaspistillSetting, myModeMeanSetting);
-
-						if (CG.lastMean == -1)
-						{
-							Log(-1, "*** %s: ERROR: aegCalcMean() returned mean of -1.\n", CG.ME);
-							Log(2, "  > Sleeping from failed exposure: %.1f seconds\n", (float)CG.currentDelay_ms / MS_IN_SEC);
-							usleep(CG.currentDelay_ms * US_IN_MS);
-							continue;
-						}
-					}
-					else {
-						myRaspistillSetting.shutter_us = CG.currentExposure_us;
-						myRaspistillSetting.analoggain = CG.currentGain;
-					}
-
-					if (CG.currentSkipFrames == 0 &&
-						CG.overlay.overlayMethod == OVERLAY_METHOD_LEGACY &&
-						doOverlay(pRgb, CG, bufTime, 0) > 0)
-					{
-						// if we added anything to overlay, write the file out
-						bool result = cv::imwrite(CG.fullFilename, pRgb, compressionParameters);
-						if (! result) fprintf(stderr, "*** ERROR: Unable to write to '%s'\n", CG.fullFilename);
-					}
+				    CG.lastExposure_us = myRaspistillSetting.shutter_us;
+				    if (myModeMeanSetting.meanAuto != MEAN_AUTO_OFF)
+				    {
+				        CG.lastGain = myRaspistillSetting.analoggain;
+				    }
+				    else
+				    {
+				        CG.lastGain = CG.currentGain;  // ZWO gain=0.1 dB , RPi gain=factor
+				    }
+				
+				    CG.lastMean = aegCalcMean(pRgb, true);
+				    CG.lastMeanFull = aegCalcMean(pRgb, false);
+				    if (myModeMeanSetting.meanAuto != MEAN_AUTO_OFF)
+				    {
+				        // set myRaspistillSetting.shutter_us and myRaspistillSetting.analoggain
+				        aegGetNextExposureSettings(&CG, myRaspistillSetting, myModeMeanSetting);
+				
+				        if (CG.lastMean == -1)
+				        {
+				            Log(-1, "*** %s: ERROR: aegCalcMean() returned mean of -1.\n", CG.ME);
+				            Log(2, "  > Sleeping from failed exposure: %.1f seconds\n", (float)CG.currentDelay_ms / MS_IN_SEC);
+				            usleep(CG.currentDelay_ms * US_IN_MS);
+				            continue;
+				        }
+				    }
+				    else
+				    {
+				        myRaspistillSetting.shutter_us = CG.currentExposure_us;
+				        myRaspistillSetting.analoggain = CG.currentGain;
+				    }
+				
+				    if (CG.currentSkipFrames == 0 &&
+				        CG.overlay.overlayMethod == OVERLAY_METHOD_LEGACY &&
+				        doOverlay(pRgb, CG, bufTime, 0) > 0)
+				    {
+				        // if we added anything to overlay, write the file out in a non-blocking way
+				        std::thread saveThread([=]() {
+				            bool result = cv::imwrite(CG.fullFilename, pRgb, compressionParameters);
+				            if (!result)
+				                fprintf(stderr, "*** ERROR: Unable to write to '%s'\n", CG.fullFilename);
+				        });
+				        saveThread.detach(); // Detach the thread to allow it to run independently
+				    }
 				}
+
 
 				// We skip the initial frames to give auto-exposure time to
 				// lock in on a good exposure.  If it does that quickly, stop skipping images.
