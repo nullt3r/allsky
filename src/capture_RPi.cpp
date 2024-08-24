@@ -60,15 +60,6 @@ std::string errorOutput			= "/tmp/capture_RPi_debug.txt";
 //---------------------------------------------------------------------------------------------
 //---------------------------------------------------------------------------------------------
 
-void saveImageNonBlocking(const std::string& filename, const cv::Mat& image, const std::vector<int>& compressionParams)
-{
-    bool result = cv::imwrite(filename, image, compressionParams);
-    if (!result)
-    {
-        fprintf(stderr, "*** ERROR: Unable to write to '%s'\n", filename.c_str());
-    }
-}
-
 // Build capture command to capture the image from the camera.
 // If an argument is IS_DEFAULT, the user didn't set it so don't pass to the program and
 // the default will be used.
